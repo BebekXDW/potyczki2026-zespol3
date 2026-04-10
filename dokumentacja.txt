@@ -1,0 +1,353 @@
+Zespol 3
+
+ZDN 1
+Utworzono projekt krzak-pol-web i namespace krzak-pol-web
+potem zaimportowano yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+  namespace: krzak-pol-web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - containerPort: 80
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+  namespace: krzak-pol-web
+spec:
+  type: ClusterIP
+  selector:
+    app: nginx
+  ports:
+    - port: 80
+      targetPort: 80
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+  namespace: krzak-pol-web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - containerPort: 80
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+  namespace: krzak-pol-web
+spec:
+  type: ClusterIP
+  selector:
+    app: nginx
+  ports:
+    - port: 80
+      targetPort: 80
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nginx-ingress
+  namespace: krzak-pol-web
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: nginx.193.187.69.235.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nginx-service
+                port:
+                  number: 80
+
+ZDN 2
+# RANCHER DASHBOARD
+# instalacja longhorn przez wbudowne w rancher dashboard charts
+cluster > apps > charts: longhorn
+install w napespace default potem next i install
+
+dodanie do projektow/namespace projekt o nazwie krzak-pol-magazyn i utworzenia w nim namespace krzak-pol-magazyn
+w storage > PVC (PersistentVolumeClaims) dodajemy nowy z ustawieniami
+  Namespace: krzak-pol-magazyn
+  Nazwa: faktury-pvc
+  StorageClass: longhorn
+  Capacity: 2Gib
+  Access mode: RWO (Single Node Read-Write)
+Potem Create i status: Bound
+
+# Uzycie import yaml:
+
+```
+apiVersion: v1
+kind: Pod
+metadata:
+  name: biuro-prezesa
+  namespace: krzak-pol-magazyn
+spec:
+  containers:
+  - name: busybox
+    image: busybox
+    # pętla sleep kontener nie zakończy pracy
+    command: ["sh", "-c", "while true; do sleep 3600; done"]
+    volumeMounts:
+    - name: dane-storage
+      mountPath: /dane_prezesa
+  volumes:
+  - name: dane-storage
+    persistentVolumeClaim:
+      claimName: faktury-pvc
+```
+
+aby sprawdzic gdy pod biuro-prezesa będzie miał status Running, wejdź w jego Execute Shell i uzyc: ls -la /dane_prezesa
+
+ZDN 3
+
+W konfiguracji deployment zmieniono image z httpdd:alpine na httpd:alpine
+W konfiguracji service zmieniono selector na app: ksiegowosc-app oraz targetPort na 80 z 8080
+
+ZDN 4
+
+instalacja neuvector do namespace (none) przez charts edytujac yaml zeby nr replik byla 1 (byly 2 takie replicas: 3, zostaly zmienione na replicas: 1)
+Po wejściu do neuvector wszedłem w policy, groups dodałem grupę 
+krzak-pol-web i criteria jako namespace=krzak-pol-web
+oraz
+ksiegowosc-prod z criteria jako namespace=ksiegowosc-prod
+następnie w network rules
+from krzak-pol-web
+to ksiegowosc-prod
+DENY
+
+ZDN 5
+
+Po wejściu w workloads -> deployments i wybraniu odpowiedniego namespace kliknięto edit config i zmieniono liczbę replik na 1
+W zakładce edit w deployment wybrano backend resources wpisano w limit cpu 150 a limit memory 128
+
+ZDN 6
+
+zaimportowałem yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+  namespace: krzak-pol-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      volumes:
+        - name: html-volume
+          emptyDir: {}
+
+      initContainers:
+        - name: init-download
+          image: alpine:latest
+          command:
+            - sh
+            - -c
+            - |
+              wget -O /data/index.html https://gist.githubusercontent.com/chrisvfritz/bc010e6ed25b802da7eb/raw/
+          volumeMounts:
+            - name: html-volume
+              mountPath: /data
+
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: html-volume
+              mountPath: /usr/share/nginx/html
+
+Aby wykonać punkt nr 3
+Na windows pobrałem openssl i wygenerowałem certyfikat
+
+openssl req -x509 -nodes -days 365 ^
+-newkey rsa:2048 ^
+-keyout tls.key ^
+-out tls.crt ^
+-subj "/CN=nginx.193.187.69.235.nip.io/O=krzak-pol-web"
+
+kubectl create secret tls nginx-tls --cert=tls.crt --key=tls.key -n krzak-pol-web
+
+Następnie zaimportowałem yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nginx-ingress
+  namespace: krzak-pol-web
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+spec:
+  ingressClassName: traefik
+
+  tls:
+    - hosts:
+        - nginx.193.187.69.235.nip.io
+      secretName: nginx-tls
+
+  rules:
+    - host: nginx.193.187.69.235.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nginx-service
+                port:
+                  number: 80
+  
+ZDN 7
+
+# Tworzenie StorageClass z polityką Retain
+storage > storageClasses > create
+  Name: krzak-longhorn-retain
+  Provisioner: longhorn (csi)
+  customise > Reclaim Policy: retain
+  numberOfReplicas: 1
+Potem Create
+prawym gornym dashboard rancher wybrac import yaml:
+
+```
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: klienci-premium
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mariadb-service
+  namespace: klienci-premium
+spec:
+  ports:
+  - port: 3306
+    name: mysql
+  clusterIP: None
+  selector:
+    app: mariadb
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mariadb
+  namespace: klienci-premium
+spec:
+  serviceName: "mariadb-service"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mariadb
+  template:
+    metadata:
+      labels:
+        app: mariadb
+    spec:
+      containers:
+      - name: mariadb
+        image: mariadb:10.6
+        env:
+        - name: MARIADB_ROOT_PASSWORD
+          value: "Potyczki2026!"
+        - name: MARIADB_DATABASE
+          value: "klienci_grazynki"
+        ports:
+        - containerPort: 3306
+          name: mysql
+        volumeMounts:
+        - name: dane-bazy
+          mountPath: /var/lib/mysql
+  volumeClaimTemplates:
+  - metadata:
+      name: dane-bazy
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: "krzak-longhorn-retain"
+      resources:
+        requests:
+          storage: 5Gi
+```
+
+ZDN 8
+  
+# UWAGA POPRAWIONY PLIK pendrive.yaml JEST ZAPISANY W REPO JAKO pendrive-popr.yaml
+po zedytowaniu poprawnego pliku mozna w prawym gornym dashboard rancher wybrac import yaml i wyprac poprawiony plik
+po dodaniu mozna przejsc na workloads > pods > (pod) tajny-panel-...
+w zakladce containers > system check, wejscie na 3 kropki i wejscie w logi poda, jesli echo System gotowy w terminalu to dziala
+
+# Weryfikacja głównego kontenera
+z widoku workloads > pods, znalesc kolumne restarts dla poda tajny-panel-... (jesli wynosi 0 to wszystko dziala)
+
+dla sprawdzenia mozna rowniez wejsc do deployments i znalesc tajny-panel gdzie wybieramy exec shell i wklejamy: curl localhost:80 (przy pokazaniu strony nginx wszystko dziala)
+
+ZDN 9
+
+w dashboard neuvector wejsc w policy > admission controll, zmienic global na zero trust (enabled) i protect
+dodac nowa regule klikajac new
+  i wybrac [image] [is one of] [latest], z mode protect enabled i save
+
+ZDN 10
+
+wszedłem w cluster potem nodes kliklem node i edit config
+w zakłądke labels dodałem 
+tier: zloto
+następnie w workloads statefulsets edit config -> pod -> node scheduling -> run on matching scheduling rules -> required -> tier zloto
+W deployment zmieniłem liczbę instancji na 5
+następnie zaimportowałem yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: nginx-pdb
+  namespace: krzak-pol-web
+spec:
+  minAvailable: 80%
+  selector:
+    matchLabels:
+      app: nginx
+
+  
